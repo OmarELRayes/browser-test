@@ -1,0 +1,137 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+buildscript {
+    repositories {
+        google()
+        jcenter()
+    }
+
+    dependencies {
+        classpath Deps.tools_androidgradle
+        classpath Deps.tools_kotlingradle
+    }
+}
+
+plugins {
+    id("io.gitlab.arturbosch.detekt").version("1.0.0.RC9.2")
+}
+
+allprojects {
+    repositories {
+        google()
+
+        maven {
+            url "https://snapshots.maven.mozilla.org/maven2"
+
+            content {
+                // Always fetch components from the snapshots repository
+                includeGroup "org.mozilla.components"
+            }
+        }
+
+        maven {
+            url "https://maven.mozilla.org/maven2"
+
+            content {
+                // Never fetch components from here. We always want to use snapshots.
+                excludeGroup "org.mozilla.components"
+            }
+        }
+
+        jcenter()
+    }
+}
+
+subprojects {
+    apply plugin: 'jacoco'
+
+    afterEvaluate {
+        if (it.hasProperty('android')) {
+            jacoco {
+                toolVersion = "0.8.2"
+            }
+
+            android {
+                testOptions {
+                    unitTests {
+                        includeAndroidResources = true
+                    }
+                }
+
+                lintOptions {
+                    warningsAsErrors true
+                    abortOnError true
+                }
+            }
+
+            if (project.hasProperty("coverage") && project.name != "support-test") {
+                tasks.withType(Test) {
+                    jacoco.includeNoLocationClasses = true
+                    doLast { jacocoTestReport.execute() }
+                }
+
+                task jacocoTestReport(type: JacocoReport) {
+                    reports {
+                        xml.enabled = true
+                        html.enabled = true
+                    }
+
+                    def fileFilter = ['**/R.class', '**/R$*.class', '**/BuildConfig.*', '**/Manifest*.*',
+                                      '**/*Test*.*', 'android/**/*.*', '**/*$[0-9].*']
+                    def kotlinDebugTree = fileTree(dir: "$project.buildDir/tmp/kotlin-classes/debug", excludes: fileFilter)
+                    def javaDebugTree = fileTree(dir: "$project.buildDir/intermediates/classes/debug", excludes: fileFilter)
+                    def mainSrc = "$project.projectDir/src/main/java"
+
+                    sourceDirectories = files([mainSrc])
+                    classDirectories = files([kotlinDebugTree, javaDebugTree])
+                    executionData = fileTree(dir: project.buildDir, includes: [
+                            'jacoco/testDebugUnitTest.exec', 'outputs/code-coverage/connected/*coverage.ec'
+                    ])
+                }
+
+                android {
+                    buildTypes {
+                        debug {
+                            testCoverageEnabled true
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}
+
+detekt {
+    // The version number is duplicated, please refer to plugins block for more details
+    version = "1.0.0.RC9.2"
+    input = files("$projectDir/app")
+    config = files("$projectDir/config/detekt.yml")
+    filters = ".*test.*,.*/resources/.*,.*/tmp/.*"
+
+    reports {
+        html {
+            enabled = true
+            destination = file("$projectDir/build/reports/detekt.html")
+        }
+    }
+}
+
+configurations {
+    ktlint
+}
+
+dependencies {
+    ktlint "com.github.shyiko:ktlint:0.24.0"
+}
+
+task ktlint(type: JavaExec, group: "verification") {
+    description = "Check Kotlin code style."
+    classpath = configurations.ktlint
+    main = "com.github.shyiko.ktlint.Main"
+    args "app/**/*.kt"
+}
